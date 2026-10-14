@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Singapore Rain — Live</title>
+<meta name="description" content="Live rainfall map for Singapore: 89 NEA rain gauges, 2-hour area nowcast, interpolated rain field.">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='24' font-size='24'>🌧️</text></svg>">
+<style>
+  :root{
+    --bg:#0b1220; --bg2:#111c30; --card:#152238; --card2:#1b2b45;
+    --line:#26374f; --txt:#e9eef7; --dim:#93a4bf; --dim2:#6c7f9d;
+    --accent:#3d9bf0; --wet:#4f9fe0; --heavy:#f2b134; --intense:#ec6a2a; --extreme:#c81e4a;
+    --ok:#3ecf8e; --warn:#f2b134;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--txt); overflow:hidden;
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{display:grid;grid-template-columns:minmax(0,1fr) 400px;grid-template-rows:auto minmax(0,1fr);height:100vh}
+  header{
+    grid-column:1/-1;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:10px 16px;background:linear-gradient(90deg,#0d1728,#14243c);border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand b{font-size:18px;letter-spacing:.2px}
+  .brand span{color:var(--dim2);font-size:12px}
+  .live{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim);
+    background:#0f1e33;border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(62,207,142,.6);animation:pulse 2.4s infinite}
+  .dot.stale{background:var(--warn);animation:none}
+  .dot.off{background:#e05a5a;animation:none}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(62,207,142,.5)}70%{box-shadow:0 0 0 9px rgba(62,207,142,0)}100%{box-shadow:0 0 0 0 rgba(62,207,142,0)}}
+  .spacer{flex:1}
+  header button{
+    background:#1b2b45;color:var(--txt);border:1px solid var(--line);border-radius:8px;
+    padding:6px 12px;font-size:13px;cursor:pointer
+  }
+  header button:hover{background:#24395a}
+
+  #map{position:relative;min-height:0;background:#0a1220}
+  .leaflet-container{background:#0a1220;font-family:inherit}
+  .leaflet-control-attribution{background:rgba(9,17,30,.78)!important;color:#9fb0c9!important;font-size:10px}
+  .leaflet-control-attribution a{color:#7fb6ee!important}
+  .leaflet-bar a{background:#152238;color:#e9eef7;border-color:#26374f}
+  .leaflet-bar a:hover{background:#24395a}
+
+  .overlay{position:absolute;z-index:500;left:12px;right:12px;pointer-events:none}
+  .overlay>*{pointer-events:auto}
+  .pills{top:12px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{
+    display:flex;align-items:center;gap:7px;background:rgba(16,27,45,.92);border:1px solid var(--line);
+    color:var(--txt);border-radius:999px;padding:6px 13px;font-size:12.5px;cursor:pointer;backdrop-filter:blur(6px)
+  }
+  .pill input{accent-color:var(--accent);margin:0}
+  .pill.on{border-color:#3d9bf0;background:rgba(23,52,88,.92)}
+  .legend{bottom:12px;left:12px;right:auto;background:rgba(16,27,45,.93);border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;backdrop-filter:blur(6px);max-width:min(560px,86vw)}
+  .legend h4{margin:0 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim2)}
+  .scale{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .swatch{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim)}
+  .swatch i{width:13px;height:13px;border-radius:50%;display:inline-block}
+  .cats{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .cat{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim)}
+  .cat i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .hint{position:absolute;z-index:520;left:12px;top:60px;background:rgba(16,27,45,.93);border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;font-size:12.5px;color:var(--dim);max-width:320px;display:none}
+  .hint b{color:var(--txt)}
+
+  aside{min-height:0;overflow-y:auto;background:var(--bg2);border-left:1px solid var(--line);padding:14px 14px 40px}
+  aside::-webkit-scrollbar{width:10px}
+  aside::-webkit-scrollbar-thumb{background:#26374f;border-radius:6px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px 14px;margin-bottom:12px}
+  .card h3{margin:0 0 10px;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim2);
+    display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .card h3 em{font-style:normal;text-transform:none;letter-spacing:0;font-size:11.5px;color:var(--dim2)}
+  .verdict{display:flex;gap:12px;align-items:flex-start}
+  .verdict .emo{font-size:34px;line-height:1}
+  .verdict p{margin:0;font-size:15.5px;font-weight:600}
+  .verdict small{display:block;margin-top:5px;color:var(--dim);font-weight:400;font-size:12.5px}
+  .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+  .stat{background:var(--card2);border-radius:10px;padding:9px 10px;min-width:0}
+  .stat b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:10.5px;color:var(--dim2);text-transform:uppercase;letter-spacing:.06em}
+  .bars{display:flex;flex-direction:column;gap:8px}
+  .bar{display:grid;grid-template-columns:minmax(0,1fr) 62px;gap:9px;align-items:center;font-size:13px}
+  .bar .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar .track{height:8px;border-radius:6px;background:#0e1a2c;overflow:hidden;margin-top:5px}
+  .bar .fill{height:100%;border-radius:6px}
+  .bar .val{text-align:right;font-variant-numeric:tabular-nums;color:var(--txt);font-weight:600}
+  .bar .val small{display:block;color:var(--dim2);font-weight:400;font-size:10.5px}
+  .empty{color:var(--dim);font-size:13px;display:flex;gap:8px;align-items:center}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--txt)}
+  .chip.wet{border-color:#2f6fd0;background:#17293f}
+  .rows{display:flex;flex-direction:column;gap:7px}
+  .row{display:flex;justify-content:space-between;gap:10px;font-size:13px;min-width:0}
+  .row span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+  .row span:last-child{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .row b{color:var(--txt)}
+  #spark{width:100%;height:64px;display:block}
+  .axis{display:flex;justify-content:space-between;color:var(--dim2);font-size:10.5px;margin-top:3px}
+  footer{color:var(--dim2);font-size:11.5px;line-height:1.6;padding:2px 2px 0}
+  footer a{color:#7fb6ee}
+  .notice{background:#3a2d12;border:1px solid #6b5424;color:#f4dcae;border-radius:10px;padding:9px 11px;font-size:12.5px;margin-bottom:12px}
+  .fld{font-size:12.5px;color:var(--dim);margin-top:8px}
+  .fld b{color:var(--txt)}
+  .btn{background:#1b2b45;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 11px;font-size:12.5px;cursor:pointer}
+  .btn:hover{background:#24395a}
+  a{color:#7fb6ee}
+  .lbl{background:transparent!important;border:none!important;box-shadow:none!important;font-size:10.5px;color:#dbe6f5;
+    text-shadow:0 1px 3px #000,0 0 6px #000;white-space:nowrap;font-weight:600;letter-spacing:.2px}
+  .gauge-tip{font-size:12px}
+  .leaflet-popup-content-wrapper{background:#152238;color:var(--txt);border:1px solid #2b4059}
+  .leaflet-popup-tip{background:#152238}
+  .leaflet-popup-content{margin:10px 12px;font-size:12.5px}
+  .pop-h{font-weight:700;font-size:13.5px;margin-bottom:5px}
+  .pop-r{display:flex;justify-content:space-between;gap:14px;color:var(--dim)}
+
+  @media (max-width:900px){
+    body{overflow:auto}
+    .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 58vh auto;height:auto;min-height:100vh}
+    aside{border-left:none;border-top:1px solid var(--line);overflow:visible;padding-bottom:26px}
+    .legend{right:12px;max-width:none}
+    .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><b>🌧️ Singapore Rain — Live</b><span>NEA gauge network + 2-hour nowcast</span></div>
+    <div class="live"><i class="dot" id="dot"></i><span id="status">Connecting…</span></div>
+    <div class="spacer"></div>
+    <button id="btn-me" title="Find the nearest rain to me">📍 Near me</button>
+    <button id="btn-refresh" title="Refresh now">↻ Refresh</button>
+  </header>
+
+  <div id="map">
+    <div class="overlay pills">
+      <label class="pill on" id="p-field"><input type="checkbox" checked> Rain field</label>
+      <label class="pill on" id="p-gauge"><input type="checkbox" checked> Gauges <span style="color:var(--dim2)" id="gauge-n"></span></label>
+      <label class="pill on" id="p-area"><input type="checkbox" checked> 2-h nowcast</label>
+    </div>
+    <div class="hint" id="hint"></div>
+    <div class="overlay legend">
+      <h4>Rain intensity — mm in the last 5 min (gauge scale)</h4>
+      <div class="scale" id="scale"></div>
+      <div class="cats" id="cats"></div>
+    </div>
+  </div>
+
+  <aside>
+    <div id="notice"></div>
+
+    <div class="card">
+      <h3>Right now <em id="asof">—</em></h3>
+      <div class="verdict">
+        <div class="emo" id="emo">⏳</div>
+        <div>
+          <p id="verdict">Loading live data…</p>
+          <small id="verdict-sub">Fetching the latest NEA readings.</small>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b id="s-wet">–</b><span>gauges wet</span></div>
+        <div class="stat"><b id="s-max">–</b><span>peak mm/5min</span></div>
+        <div class="stat"><b id="s-area">–</b><span>areas w/ rain</span></div>
+      </div>
+      <div class="fld" id="fld"></div>
+    </div>
+
+    <div class="card">
+      <h3>Wettest gauges <em>top 8 · mm/5min</em></h3>
+      <div class="bars" id="bars"></div>
+    </div>
+
+    <div class="card">
+      <h3>2-hour nowcast by area <em id="now-valid">—</em></h3>
+      <div class="rows" id="nowcast"></div>
+    </div>
+
+    <div class="card">
+      <h3>Near me <em>optional</em></h3>
+      <div id="nearme" class="fld">Tap <b>📍 Near me</b> (or open <code>#test=1.3521,103.8198</code>) to see the nearest rain and your area's forecast.</div>
+    </div>
+
+    <div class="card">
+      <h3>Trend while open <em id="trend-n">—</em></h3>
+      <svg id="spark" viewBox="0 0 300 64" preserveAspectRatio="none"></svg>
+      <div class="axis"><span id="t0">—</span><span id="t1">—</span></div>
+      <div class="fld" id="trend-txt">Building a local history from each refresh…</div>
+    </div>
+
+    <footer>
+      <b>Sources</b> · Data.gov.sg / NEA: <code>v2/real-time/api/rainfall</code> (89 gauges, 5-min totals) and
+      <code>v2/real-time/api/two-hr-forecast</code> (47 areas), fetched live in your browser every ~3 min.<br>
+      Rainfall values are <b>point measurements</b>; the shaded field is an inverse-distance interpolation of those
+      gauges (indicative only, clipped to the main island) — it is not a radar image and cannot see rain between gauges.
+      Area outlines: © OpenStreetMap contributors. Tiles: OpenStreetMap.<br>
+      Map <a href="https://www.weather.gov.sg/weather-rain-area-50km/" target="_blank" rel="noopener">NEA rain area</a> ·
+      <a href="https://data.gov.sg/collections/3/view" target="_blank" rel="noopener">data.gov.sg</a>.
+    </footer>
+  </aside>
+</div>
+
+<script>
+// fail loudly instead of silently showing stale placeholders
+window.addEventListener('error', function (e) {
+  document.title = 'JS error: ' + (e.message || e);
+  var n = document.createElement('div');
+  n.className = 'notice';
+  n.style.margin = '10px';
+  n.textContent = '⚠️ Script error: ' + (e.message || e) + ' — the live map may not update.';
+  document.body ? document.body.prepend(n) : document.addEventListener('DOMContentLoaded', function () { document.body.prepend(n); });
+}, true);
+</script>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
