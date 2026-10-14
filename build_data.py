@@ -11,7 +11,7 @@ import urllib.request
 
 UA = {"User-Agent": "Mozilla/5.0 (hermes-jarvis) sg-rain-live"}
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "web", "data.js")
+OUT = os.path.join(HERE, "data.js")
 
 API = "https://api-open.data.gov.sg/v2/real-time/api/"
 
